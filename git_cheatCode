@@ -1,0 +1,34 @@
+  git status
+  git add .
+  git commit -m "Adding README file"
+  git remote add origin https://github.com/SumitParashari/interview_ready.git  // add remote repo alias i.e. origin here
+  
+  git remote
+  git branch
+  git push origin master
+  git branch practise // create a local branch
+  git branch
+  
+  git checkout practise // switch to practise branch
+  git branch
+  git status
+  vi README.md
+  git diff
+  git config --global --edit // to edit config
+  
+========= Merging practise branch changes to master branch ========
+
+  git add .
+  git commit -m "adding gitignore file"
+  git push origin practise   // stage/add chages in practise branch and commit and push it to remote practise
+
+  git checkout master  // switch to master
+  git branch
+  git pull origin master  // update local master from remote master
+  
+  git merge practise  // merge practise branch into master
+  git status
+
+  git push origin master // push the changes to master
+
+  git restore --staged <file_name> //  to unstage the staged/ added file
