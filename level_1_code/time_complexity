@@ -1,0 +1,7 @@
+
+Worst case - O(big oh) notation
+Average case - Ω(omega) notation
+Best case - Θ(theta) notation
+
+Fro time complexity we multiply n if loops are nested(like n2 if two loops are nested)
+And for two same loops we add up the n(2n for two identical loops)
