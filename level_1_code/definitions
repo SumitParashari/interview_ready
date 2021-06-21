@@ -12,6 +12,5 @@ Binary search -  binary search, also known as half-interval search, logarithmic 
 Sorting time complexity:
 Bubble sort - O(n2)
 Merge sort - O(nlog(n))
-Fast sort - O(n)
             
             
