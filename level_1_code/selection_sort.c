@@ -15,7 +15,7 @@ void selection_sort(int **array, int size)
 int main()
 {
 	int i,data[10];
-        int size = sizeof(data)/sizeof(int);
+        int size = sizeof(data)/sizeof(data[0]);
 	
 	for(i=0; i < size; i++)
 	{
