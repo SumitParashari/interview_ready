@@ -1,6 +1,8 @@
 IPSEC RELATED Q&A:
 =================
 
+http://networkerinterview.net/entries/vpn/vpn-interview-questions-and-answers
+
 Which UDP ports should be open on a firewall to allow traffic from a L2TP/IPSEC based VPN clients to a PPTP VPN server on the inside
 
 UDP port 500 for IKE traffic, UDP port 1701 for L2TP communication between client and server and UDP port 4500 for NAT-T communication.
