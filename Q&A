@@ -1,0 +1,35 @@
+IPSEC RELATED Q&A:
+=================
+
+Which UDP ports should be open on a firewall to allow traffic from a L2TP/IPSEC based VPN clients to a PPTP VPN server on the inside
+
+UDP port 500 for IKE traffic, UDP port 1701 for L2TP communication between client and server and UDP port 4500 for NAT-T communication.
+
+In which IPSEC Phase is the keys used for data encryption derived.
+
+The keys are derived in IPSEC phase 2. The derived keys are used by IPSEC protocol ESP for encrypting the data.
+
+How the IPSEC do protocols, ESP and AH provides replay protection.
+
+ESP and AH include the sequence number fields in the respective headers. The values are used by the IPSEC peers to track duplicate packets. If a packet with an already received sequence number arrives, it would be rejected, thus providing replay protection.
+
+In IPSEC, If ESP provides both encryption and authentication, why is AH required.
+
+ESP does not provide authentication to the outer IP header, which AH does.
+
+Explain two methods by which two IPSEC routers can authenticate with each other.
+
+IPSEC routers can be authenticated using pre-shared keys or using digital
+certificates.
+
+What is the use of configuring ACL in IPSEC configuration on a Cisco router.
+
+The ACL would make the router understand that the traffic corresponding to the network associated with the ACL, has to be sent encrypted over the ISPEC tunnel and all other traffic is to be send unencrypted.
+
+Which IP protocol does AH and ESP headers use in IPSEC .
+
+ESP and AH uses IP protocol 50 and 51 respectively.
+
+Which type of VPN would you use if data has to be encrypted at the network layer
+
+IPSEC VPN encrypts data at the network layer whereas SSL encrypts data at the application layer.
