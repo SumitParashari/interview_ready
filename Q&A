@@ -35,3 +35,8 @@ ESP and AH uses IP protocol 50 and 51 respectively.
 Which type of VPN would you use if data has to be encrypted at the network layer
 
 IPSEC VPN encrypts data at the network layer whereas SSL encrypts data at the application layer.
+
+
+PACKET TRAVELING:
+================
+https://www.practicalnetworking.net/series/packet-traveling/packet-traveling/
