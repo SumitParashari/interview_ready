@@ -40,3 +40,7 @@ IPSEC VPN encrypts data at the network layer whereas SSL encrypts data at the ap
 PACKET TRAVELING:
 ================
 https://www.practicalnetworking.net/series/packet-traveling/packet-traveling/
+
+TOS/DSCP in IP HEADER:
+=====================
+https://www.slashroot.in/understanding-differentiated-services-tos-field-internet-protocol-header
