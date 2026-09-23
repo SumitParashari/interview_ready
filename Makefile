@@ -7,7 +7,7 @@ TARGET = my_program
 
 # 3. List the directories where your .c files are located
 # Add or change these to match your folder structure
-SRC_DIRS = src utils main_folder
+SRC_DIRS = linked_list array
 
 # 4. Automatically find all .c files in the specified directories
 SRCS = $(wildcard $(addsuffix /*.c, $(SRC_DIRS)))
