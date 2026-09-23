@@ -6,5 +6,13 @@
 int main(int argc, char **argv) {
   NODE *head = NULL;
 
-  addNode();
+  insertAtHead(&head, 2);
+  insertAtTail(&head, 5);
+  insertAtTail(&head, 3);
+  //insertAfterNode(struct Node* prev_node, int new_data);
+  
+  deleteNodeByKey(&head, 5);
+  deleteNodeAtPosition(&head, 9);
+  
+  printList(head);
 }
