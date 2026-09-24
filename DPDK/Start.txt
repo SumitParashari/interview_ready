@@ -1,0 +1,1268 @@
+For a **senior network-development role**, you don't need to memorize every DPDK API. You need to be able to explain **why DPDK exists, how packets move through a DPDK application, what the performance bottlenecks are, and how you'd debug/optimize them**.
+
+Here's the interview-oriented crash course I'd use.
+
+## 1. First: what DPDK actually is
+
+**DPDK (Data Plane Development Kit)** is a set of libraries and drivers for building **high-performance packet-processing applications in user space**.
+
+The traditional Linux networking path roughly looks like:
+
+```text
+NIC
+ ↓
+Kernel driver
+ ↓
+Linux networking stack
+ ↓
+Socket
+ ↓
+Application
+```
+
+A DPDK application generally aims for something closer to:
+
+```text
+NIC
+ ↓
+User-space NIC driver / PMD
+ ↓
+DPDK RX ring
+ ↓
+Application
+ ↓
+DPDK TX ring
+ ↓
+NIC
+```
+
+The big idea is:
+
+> **Avoid expensive kernel/network-stack processing and process packets directly in user space using polling, batching, CPU affinity, and efficient memory management.**
+
+Typical applications include:
+
+* Routers
+* Firewalls
+* Load balancers
+* Packet brokers
+* 5G/core networking
+* Virtual switches
+* IDS/IPS
+* Network appliances
+* High-frequency packet processing
+
+---
+
+# 2. The concepts you absolutely need to know
+
+I'd prioritize these.
+
+### A. PMD — Poll Mode Driver
+
+This is one of the most important DPDK concepts.
+
+Instead of relying on interrupts for every incoming packet, DPDK applications typically **poll the NIC**.
+
+Conceptually:
+
+```c
+while (running) {
+    n = rte_eth_rx_burst(port, queue, mbufs, BURST_SIZE);
+
+    for (i = 0; i < n; i++) {
+        process_packet(mbufs[i]);
+    }
+
+    rte_eth_tx_burst(port, queue, mbufs, n);
+}
+```
+
+The important API is:
+
+```c
+rte_eth_rx_burst()
+rte_eth_tx_burst()
+```
+
+You should understand **burst processing** very well.
+
+Instead of:
+
+```text
+packet → process
+packet → process
+packet → process
+```
+
+DPDK does:
+
+```text
+packet packet packet packet
+          ↓
+       process batch
+```
+
+This improves efficiency by reducing per-packet overhead and improving cache utilization.
+
+---
+
+# 3. `rte_mbuf` — extremely important
+
+If an interviewer asks:
+
+> "How does DPDK represent a packet?"
+
+You should immediately think:
+
+**`rte_mbuf`**
+
+An `rte_mbuf` is the metadata/buffer structure used to represent packet data.
+
+Conceptually:
+
+```text
++-------------------+
+| rte_mbuf metadata |
++-------------------+
+| packet data       |
+|                   |
+| Ethernet header   |
+| IP header         |
+| TCP/UDP           |
+| payload           |
++-------------------+
+```
+
+Know these concepts:
+
+* `data_off`
+* `data_len`
+* `pkt_len`
+* `buf_addr`
+* `buf_len`
+* headroom
+* tailroom
+* chained mbufs / multi-segment packets
+
+For example:
+
+```c
+struct rte_mbuf *m;
+```
+
+Packet data can be accessed using something like:
+
+```c
+char *data = rte_pktmbuf_mtod(m, char *);
+```
+
+### Why is headroom important?
+
+DPDK reserves space before the packet data.
+
+This allows you to prepend headers efficiently.
+
+For example:
+
+```text
+[ headroom ][ Ethernet ][ IP ][ TCP ][ payload ]
+             ^
+             data pointer
+```
+
+If you need to add an encapsulation header, you can move the data pointer backward rather than allocating a completely new buffer.
+
+That's exactly the kind of detail a senior interviewer may probe.
+
+---
+
+# 4. Mempool
+
+The next thing to understand is:
+
+**`rte_mempool`**
+
+DPDK doesn't want to repeatedly call:
+
+```c
+malloc()
+free()
+```
+
+for every packet.
+
+Instead, it preallocates pools of objects.
+
+```text
+                 rte_mempool
+              +---------------+
+              | mbuf           |
+              | mbuf           |
+              | mbuf           |
+              | mbuf           |
+              | ...            |
+              +---------------+
+                     |
+              allocate/recycle
+                     |
+                  rte_mbuf
+```
+
+Typical initialization:
+
+```c
+rte_pktmbuf_pool_create(...)
+```
+
+Then:
+
+```c
+rte_pktmbuf_alloc()
+```
+
+and:
+
+```c
+rte_pktmbuf_free()
+```
+
+You should understand **why pools are faster**:
+
+* Avoid general-purpose allocator overhead
+* Predictable allocation
+* Better cache behavior
+* Objects can be reused
+* Reduced fragmentation
+
+---
+
+# 5. Hugepages
+
+This is another **must-know interview topic**.
+
+DPDK commonly uses **hugepages** rather than normal 4-KB pages.
+
+Why?
+
+Primarily:
+
+* fewer TLB entries required
+* fewer page-table translations
+* better memory-management efficiency
+* suitable for large, pinned DMA buffers
+
+Think:
+
+```text
+Normal pages:
+
+4 KB × thousands/millions of pages
+       ↓
+lots of TLB entries
+
+Hugepages:
+
+2 MB / 1 GB pages
+       ↓
+fewer translations
+```
+
+You should know the terms:
+
+* hugepages
+* NUMA
+* physical/virtual memory
+* DMA
+* IOVA
+
+---
+
+# 6. NUMA — very important for senior roles
+
+This is an area where I'd expect a senior network engineer to know more than the basics.
+
+Modern servers can look like:
+
+```text
+             CPU Socket 0
+           /              \
+       CPU cores         RAM 0
+           |
+          NIC 0
+
+
+             CPU Socket 1
+           /              \
+       CPU cores         RAM 1
+           |
+          NIC 1
+```
+
+Memory attached to the local NUMA node is generally faster to access than remote memory.
+
+Therefore:
+
+> **Run the packet-processing core close to the NIC and allocate its mbufs/memory from the same NUMA node whenever possible.**
+
+Bad:
+
+```text
+NIC 0
+  ↓
+CPU 0
+  ↓
+Memory on NUMA node 1
+```
+
+Better:
+
+```text
+NIC 0
+  ↓
+CPU 0
+  ↓
+Memory on NUMA node 0
+```
+
+Interview question:
+
+> "My DPDK application is only getting 50% of expected throughput. What would you investigate?"
+
+A good senior answer includes:
+
+* NUMA locality
+* CPU affinity
+* RX/TX queue configuration
+* packet size
+* burst size
+* cache misses
+* memory bandwidth
+* PCIe limitations
+* NIC capabilities
+* RSS configuration
+* drops
+* lock contention
+* mbuf allocation/free overhead
+* branch misprediction
+* synchronization
+* power/CPU frequency
+
+---
+
+# 7. RX/TX queues
+
+Understand this diagram:
+
+```text
+                 NIC
+                  |
+       +----------+----------+
+       |          |          |
+      RX0        RX1        RX2
+       |          |          |
+     Core 0     Core 1     Core 2
+       |          |          |
+      TX0        TX1        TX2
+```
+
+A NIC can have multiple queues.
+
+DPDK applications typically assign queues to logical cores.
+
+This lets multiple cores process packets concurrently **without everyone fighting over one queue**.
+
+You should understand:
+
+* RX queues
+* TX queues
+* queue-to-core mapping
+* RSS
+* flow distribution
+* queue descriptors
+* ring buffers
+
+---
+
+# 8. RSS
+
+**Receive Side Scaling (RSS)** distributes incoming flows across RX queues.
+
+For example:
+
+```text
+                    NIC
+                     |
+              RSS hash calculation
+              /       |       \
+             /        |        \
+          RX0        RX1       RX2
+           |          |         |
+         Core0      Core1     Core2
+```
+
+Typically the NIC hashes fields such as:
+
+```text
+src IP
+dst IP
+src port
+dst port
+protocol
+```
+
+The key property:
+
+> Packets belonging to the same flow should normally land on the same queue/core, preserving ordering while distributing different flows.
+
+Be prepared to explain why RSS matters for scaling.
+
+---
+
+# 9. Rings
+
+DPDK uses lockless or low-lock-overhead ring structures extensively.
+
+Think:
+
+```text
+Producer
+   ↓
++----+----+----+----+----+
+|    |    |    |    |    |
++----+----+----+----+----+
+                         ↑
+                      Consumer
+```
+
+Common concept:
+
+```c
+rte_ring
+```
+
+Used for passing objects between components/cores.
+
+Interviewers may ask:
+
+> "How would you communicate between two DPDK worker cores?"
+
+One possible answer:
+
+**Use an `rte_ring`, preferably with a carefully designed single-producer/single-consumer or multi-producer/multi-consumer configuration depending on the architecture.**
+
+But also mention:
+
+> Avoid unnecessary cross-core communication in the hot path because synchronization and cache-line movement can destroy performance.
+
+---
+
+# 10. Why DPDK is fast
+
+You should have a crisp answer ready.
+
+Something like:
+
+> "DPDK achieves high packet-processing performance by moving packet processing into user space, using poll-mode drivers instead of per-packet interrupts, preallocated mbuf/mempool objects instead of general-purpose allocation, hugepages for efficient memory translation, burst processing for amortizing overhead, CPU affinity and NUMA awareness for locality, and carefully designed lockless or low-lock data structures."
+
+That's a very good interview answer.
+
+---
+
+# 11. Polling vs interrupts
+
+Understand this tradeoff.
+
+### Interrupt-driven
+
+```text
+Packet arrives
+    ↓
+NIC interrupt
+    ↓
+CPU wakes/handles interrupt
+    ↓
+process packet
+```
+
+Good for:
+
+* low traffic
+* saving CPU
+* general-purpose networking
+
+But interrupt overhead becomes problematic at very high packet rates.
+
+### Polling
+
+```text
+CPU
+ |
+ +--> check RX queue
+ |
+ +--> check RX queue
+ |
+ +--> check RX queue
+ |
+ +--> process packets
+```
+
+Good for:
+
+* high packet rates
+* predictable latency
+* high throughput
+
+But:
+
+> It consumes CPU even when there are no packets.
+
+That's an important tradeoff.
+
+---
+
+# 12. DPDK initialization
+
+You should know the rough lifecycle.
+
+Something like:
+
+```text
+rte_eal_init()
+       ↓
+Discover/configure devices
+       ↓
+Create mempool
+       ↓
+Configure NIC
+       ↓
+Configure RX/TX queues
+       ↓
+Start NIC
+       ↓
+Launch worker lcores
+       ↓
+Packet-processing loop
+```
+
+Important APIs to recognize:
+
+```c
+rte_eal_init()
+
+rte_eth_dev_count_avail()
+
+rte_eth_dev_configure()
+
+rte_eth_rx_queue_setup()
+
+rte_eth_tx_queue_setup()
+
+rte_eth_dev_start()
+
+rte_eth_rx_burst()
+
+rte_eth_tx_burst()
+
+rte_pktmbuf_pool_create()
+```
+
+You don't need to memorize every function signature.
+
+Know **what each stage does**.
+
+---
+
+# 13. EAL
+
+**EAL = Environment Abstraction Layer**
+
+This is another term you'll almost certainly encounter.
+
+It abstracts things such as:
+
+* CPU cores
+* memory
+* hugepages
+* PCI devices
+* NUMA
+* process/thread environment
+
+Typical application:
+
+```bash
+./my_dpdk_app -l 0-3 -n 4
+```
+
+Know broadly what those parameters mean.
+
+`-l` specifies logical cores.
+
+`-n` historically relates to memory channels.
+
+You should also recognize newer/commonly used options such as:
+
+```text
+--lcores
+--socket-mem
+--huge-dir
+--file-prefix
+-a / --allow
+```
+
+Don't worry about memorizing every EAL flag.
+
+---
+
+# 14. PCIe and NIC binding
+
+A DPDK NIC generally needs to be usable by a DPDK-compatible driver.
+
+You'll encounter things such as:
+
+```text
+vfio-pci
+uio_pci_generic
+```
+
+Historically:
+
+```text
+igb_uio
+```
+
+was also common.
+
+**VFIO** is particularly important to understand at a conceptual level.
+
+The flow is roughly:
+
+```text
+PCIe NIC
+   ↓
+VFIO
+   ↓
+DPDK PMD
+   ↓
+DPDK application
+```
+
+Know that DPDK may take ownership/access to the device through a userspace-friendly mechanism rather than the normal Linux networking driver path.
+
+---
+
+# 15. DPDK vs kernel networking
+
+This is a likely interview question.
+
+| Traditional Linux       | DPDK                               |
+| ----------------------- | ---------------------------------- |
+| Kernel networking stack | User-space packet processing       |
+| Interrupt-oriented      | Polling commonly used              |
+| Sockets                 | Direct NIC APIs                    |
+| General-purpose         | High-performance packet processing |
+| Kernel scheduling       | Application-controlled cores       |
+| General allocator       | Mempools                           |
+| Normal pages            | Hugepages commonly used            |
+| More abstraction        | More control                       |
+
+But **don't say "DPDK is always faster."**
+
+That's too simplistic.
+
+For small workloads, low packet rates, ordinary applications, or workloads that benefit from the kernel stack, traditional networking may be more appropriate.
+
+DPDK is particularly valuable when **packet rate and deterministic/high throughput processing matter**.
+
+---
+
+# 16. DPDK is not just "a driver"
+
+This is worth emphasizing.
+
+DPDK provides an ecosystem of libraries:
+
+```text
+                    DPDK
+                      |
+      +---------------+----------------+
+      |               |                |
+     EAL            ethdev           mbuf
+      |               |                |
+   memory          NIC APIs         packets
+      |
+   lcores
+      |
+   NUMA
+```
+
+Other important areas you'll encounter:
+
+* `rte_hash`
+* `rte_acl`
+* `rte_lpm`
+* `rte_timer`
+* `rte_ring`
+* `rte_mempool`
+* `rte_malloc`
+* cryptodev
+* compressdev
+* eventdev
+* graph framework
+* flow API
+
+For a network-development interview, understand the first group more deeply than the specialized libraries.
+
+---
+
+# 17. A senior-level packet-processing architecture
+
+Be able to design something like this on a whiteboard:
+
+```text
+                 NIC
+                  |
+             +----+----+
+             |   RSS   |
+             +----+----+
+                  |
+        +---------+---------+
+        |         |         |
+       RX0       RX1       RX2
+        |         |         |
+      Core0     Core1     Core2
+        |         |         |
+        +---- packet ------+
+                  |
+             lookup/classify
+                  |
+        +---------+---------+
+        |                   |
+     forwarding          slow path
+        |                   |
+       TX                  ring
+        |                   |
+       NIC                Core N
+```
+
+Then discuss:
+
+* How many queues?
+* How many cores?
+* Which NUMA node?
+* Where are mempools allocated?
+* How is RSS configured?
+* Where does packet classification happen?
+* How do you avoid locks?
+* How are flows distributed?
+* How do you handle backpressure?
+* What happens when TX is full?
+* How are statistics collected without contention?
+
+Those are **senior-level DPDK questions**.
+
+---
+
+# 18. Performance questions you should prepare for
+
+### "How do you improve DPDK performance?"
+
+Don't answer merely "use more cores."
+
+Discuss:
+
+**CPU**
+
+* pin worker threads
+* avoid unnecessary context switching
+* isolate cores where appropriate
+* optimize hot paths
+
+**Memory**
+
+* NUMA locality
+* hugepages
+* cache locality
+* avoid unnecessary copies
+
+**Packet processing**
+
+* burst processing
+* prefetching where beneficial
+* minimize branches
+* minimize packet copies
+* efficient lookup structures
+
+**Concurrency**
+
+* avoid global locks
+* per-core data structures
+* minimize shared state
+* avoid false sharing
+
+**NIC**
+
+* RSS
+* multiple RX/TX queues
+* descriptor sizing
+* offloads
+* PCIe bandwidth
+
+**Measurement**
+
+* measure cycles/packet
+* packets/sec
+* throughput
+* drops
+* latency
+* cache misses
+* CPU utilization
+
+---
+
+# 19. False sharing
+
+This is a good senior-level topic.
+
+Suppose:
+
+```c
+struct stats {
+    uint64_t packets_core0;
+    uint64_t packets_core1;
+};
+```
+
+If both values happen to occupy the same cache line:
+
+```text
+Cache line
++-----------------------------+
+| core0 counter | core1       |
++-----------------------------+
+```
+
+Two cores repeatedly modifying their counters can cause cache-line bouncing.
+
+Better:
+
+```text
+Core 0 → cache line 0
+Core 1 → cache line 1
+```
+
+using appropriate alignment/padding.
+
+Know the term:
+
+**false sharing**
+
+and be able to explain why it hurts packet-processing performance.
+
+---
+
+# 20. Offloads
+
+Know what NIC hardware can do for you.
+
+Examples:
+
+* checksum offload
+* TSO
+* TCP segmentation
+* VLAN stripping/insertion
+* RSS
+* flow steering
+* scatter/gather
+* multi-segment packets
+
+The basic principle:
+
+```text
+CPU does everything
+       ↓
+CPU does less
+       ↓
+NIC hardware performs some operations
+```
+
+But there's a tradeoff: **don't blindly enable every offload**. Understand what the hardware, PMD and application actually support.
+
+---
+
+# 21. `rte_eth_rx_burst()` is worth understanding deeply
+
+Suppose:
+
+```c
+nb_rx = rte_eth_rx_burst(
+    port_id,
+    queue_id,
+    rx_pkts,
+    BURST_SIZE
+);
+```
+
+It returns the number of packets received.
+
+Then:
+
+```c
+for (i = 0; i < nb_rx; i++) {
+    process(rx_pkts[i]);
+}
+```
+
+Potential questions:
+
+### Why doesn't it always return `BURST_SIZE`?
+
+Because there may not be that many packets available.
+
+### Why use bursts?
+
+Amortizes overhead and improves cache efficiency.
+
+### What happens to mbufs after TX?
+
+The application needs to correctly manage ownership/freeing depending on whether transmission succeeds and how the TX API/driver handles the buffers.
+
+That last part is important: **memory ownership is something you should understand rather than assuming `rte_eth_tx_burst()` always frees everything.**
+
+---
+
+# 22. Packet drops
+
+Be ready for:
+
+> "Packets are being dropped. How do you debug it?"
+
+I'd structure the investigation:
+
+```text
+NIC
+ ↓
+RX ring
+ ↓
+DPDK RX
+ ↓
+Application
+ ↓
+Processing
+ ↓
+TX ring
+ ↓
+NIC
+```
+
+Check each stage.
+
+### RX side
+
+* NIC counters
+* RX queue drops
+* RX descriptors
+* RSS distribution
+* link speed
+* PCIe issues
+
+### Application
+
+* processing rate
+* CPU saturation
+* bursts
+* mbuf availability
+* mempool exhaustion
+* lock contention
+* cache misses
+
+### TX
+
+* TX queue congestion
+* failed `rte_eth_tx_burst()`
+* insufficient descriptors
+* NIC TX drops
+
+You should also know the importance of **observability**: per-queue counters, NIC statistics, application counters, and latency/throughput measurements.
+
+---
+
+# 23. DPDK debugging tools/concepts
+
+Know the existence of:
+
+* `testpmd`
+* DPDK examples
+* `rte_eth_stats_get()`
+* `rte_eth_xstats_get()`
+* `dpdk-proc-info`
+* `dpdk-devbind.py`
+* `lspci`
+* `ethtool`
+* `perf`
+* `gdb`
+
+`testpmd` is particularly worth knowing.
+
+It's essentially a DPDK reference/test application used to exercise NICs and test packet forwarding/configuration.
+
+An interviewer might ask:
+
+> "Before blaming my application, how would you establish that the NIC and DPDK environment are working correctly?"
+
+A strong answer includes testing with **testpmd**.
+
+---
+
+# 24. Questions I'd expect in a senior interview
+
+Prepare answers to these:
+
+### Fundamentals
+
+1. What is DPDK?
+2. Why is DPDK faster than traditional sockets?
+3. What is a PMD?
+4. Why polling instead of interrupts?
+5. What is an `rte_mbuf`?
+6. What is an `rte_mempool`?
+7. What are hugepages?
+8. What is EAL?
+9. What is NUMA?
+
+### Architecture
+
+10. Explain the RX → processing → TX path.
+11. How do RX queues map to cores?
+12. What is RSS?
+13. How would you design a multi-core packet processor?
+14. How do you avoid locking?
+15. How would you communicate between workers?
+16. How do you preserve packet ordering?
+
+### Performance
+
+17. How would you optimize a DPDK application?
+18. Why might adding more cores make performance worse?
+19. What is false sharing?
+20. Why does NUMA matter?
+21. Why does batching help?
+22. When would prefetching help?
+23. How would you diagnose low throughput?
+24. How would you diagnose high packet drops?
+
+### C/programming
+
+25. How does cache locality affect packet processing?
+26. What happens when `rte_eth_tx_burst()` cannot transmit all packets?
+27. How do you manage mbuf ownership?
+28. What happens when the mempool runs out?
+29. How would you implement a per-flow lookup?
+30. When would you use `rte_hash`, `rte_lpm`, or a custom table?
+
+---
+
+# 25. One thing I'd specifically prepare: DPDK + C
+
+For a senior network role, expect some C.
+
+You should be comfortable reading something like:
+
+```c
+struct rte_mbuf *pkts[BURST_SIZE];
+
+uint16_t n = rte_eth_rx_burst(
+    port,
+    queue,
+    pkts,
+    BURST_SIZE
+);
+
+for (uint16_t i = 0; i < n; i++) {
+    struct rte_mbuf *m = pkts[i];
+
+    struct rte_ether_hdr *eth =
+        rte_pktmbuf_mtod(m, struct rte_ether_hdr *);
+
+    if (eth->ether_type == rte_cpu_to_be_16(RTE_ETHER_TYPE_IPV4)) {
+        // process IPv4
+    }
+}
+```
+
+You should understand what's happening rather than necessarily memorizing the syntax.
+
+In particular:
+
+```text
+rte_mbuf
+   ↓
+packet data
+   ↓
+Ethernet header
+   ↓
+IPv4 header
+   ↓
+TCP/UDP
+```
+
+And be comfortable with:
+
+* pointers
+* structs
+* alignment
+* endian conversion
+* bit manipulation
+* memory ownership
+* cache behavior
+* atomics
+* lock-free concepts
+
+---
+
+# 26. What I would NOT spend much time on initially
+
+Given that you have limited DPDK experience, don't try to learn the entire DPDK API.
+
+Don't spend your first hours memorizing:
+
+```text
+hundreds of rte_* functions
+```
+
+Instead, get extremely comfortable with this mental model:
+
+```text
+               DPDK APPLICATION
+
+             EAL / initialization
+                     |
+                     ↓
+                  NIC PMD
+                     |
+              RX/TX queues
+                     |
+                     ↓
+                  rte_mbuf
+                     |
+                     ↓
+              packet processing
+                     |
+             rte_ring / lookup
+                     |
+                     ↓
+                  TX queue
+                     |
+                     ↓
+                    NIC
+```
+
+And underneath it:
+
+```text
+        CPU cores
+           |
+        NUMA locality
+           |
+       hugepages
+           |
+        mempools
+           |
+      cache efficiency
+```
+
+If you can explain that architecture clearly, you're already much better prepared than someone who merely memorized DPDK APIs.
+
+---
+
+# 27. A 2-day crash plan
+
+If your interview is soon, I'd do:
+
+### Day 1 — fundamentals
+
+**2 hours**
+
+* DPDK architecture
+* EAL
+* PMD
+* polling
+* RX/TX queues
+
+**2 hours**
+
+* `rte_mbuf`
+* mempool
+* hugepages
+* NUMA
+
+**2 hours**
+
+* RSS
+* rings
+* multi-core architecture
+* packet-processing pipeline
+
+**1–2 hours**
+
+* Read a simple DPDK forwarding example
+* Follow `rte_eal_init → mempool → port configure → queues → rx_burst → processing → tx_burst`
+
+### Day 2 — senior-level topics
+
+**2 hours**
+
+* performance optimization
+* cache locality
+* NUMA
+* false sharing
+* batching
+* prefetching
+
+**2 hours**
+
+* NIC queues
+* RSS
+* offloads
+* descriptors
+* packet drops
+
+**2 hours**
+
+* debugging methodology
+* `testpmd`
+* NIC statistics
+* `perf`
+* `dpdk-proc-info`
+
+**1–2 hours**
+Practice answering architecture questions aloud.
+
+---
+
+## The 10 things I'd make sure you can explain without notes
+
+If you remember nothing else, make sure you can confidently explain:
+
+1. **What DPDK is and why it exists**
+2. **PMD and polling**
+3. **`rte_mbuf`**
+4. **mempools**
+5. **hugepages**
+6. **NUMA**
+7. **RX/TX queues + RSS**
+8. **burst processing**
+9. **multi-core/lockless architecture**
+10. **how you'd diagnose a throughput/drop problem**
+
+And for a **senior** position, don't stop at "what." Constantly ask yourself **why**:
+
+> Why polling?
+> Why hugepages?
+> Why mempools?
+> Why per-core state?
+> Why RSS?
+> Why NUMA locality?
+> Why batching?
+> Why avoid locks?
+> Why can more cores make things slower?
